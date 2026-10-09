@@ -9,7 +9,7 @@ import EcoLinkLogo from './components/EcoLinkLogo';
 import SplashScreen from './components/SplashScreen';
 import { getTranslation } from './translations';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+const API_BASE_URL = (typeof process !== 'undefined' && process.env && process.env.VITE_API_BASE_URL) || import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
 
 function App() {
   const [showSplash, setShowSplash] = useState(true);
@@ -431,7 +431,7 @@ function App() {
       }}>
         {user ? (
           user.role === 'food_business' ? (
-            <FoodBusinessDashboard token={token} apiBaseUrl={API_BASE_URL} activeNavTab={activeNavTab} language={language} t={t} />
+            <FoodBusinessDashboard user={user} token={token} apiBaseUrl={API_BASE_URL} activeNavTab={activeNavTab} language={language} t={t} />
           ) : (
             <BiomassDashboard user={user} token={token} apiBaseUrl={API_BASE_URL} activeNavTab={activeNavTab} language={language} t={t} />
           )

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, Circle, LayersControl } from 'react-leaflet';
 import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { Search, Compass, MapPin, Truck, AlertCircle, FileText, Check, BarChart2, Award, Filter, ArrowUpDown, Calculator, Zap, Flame, ShieldCheck, Clock, RefreshCw, CheckCircle2, Printer, Download, Trash2, CreditCard, QrCode, Building2, Wallet, CheckCircle, Receipt, ArrowRight, DollarSign, Shield } from 'lucide-react';
 
 const { BaseLayer } = LayersControl;
@@ -115,6 +116,9 @@ const BiomassDashboard = ({ user, token, apiBaseUrl, activeNavTab = 'map_post', 
 
   const [refreshToast, setRefreshToast] = useState('');
 
+  const currentUserId = (user?._id || user?.id || '').toString();
+  const currentEmail = (user?.email || '').toLowerCase().trim();
+
   const fetchData = async (isManual = false) => {
     setLoadingListings(true);
     try {
@@ -201,10 +205,16 @@ const BiomassDashboard = ({ user, token, apiBaseUrl, activeNavTab = 'map_post', 
         setListings(combinedListings);
       }
 
-      // Merge local requests from localStorage
+      // Merge local requests submitted by THIS recycler only
       const localReqs = JSON.parse(localStorage.getItem('ecolink_local_requests') || '[]');
+      const myLocalReqs = localReqs.filter(r => {
+        const cId = (r.consumerId || r.consumer?._id || r.consumer?.id || r.consumer || '').toString();
+        const cEmail = (r.consumerEmail || r.consumer?.email || '').toLowerCase().trim();
+        return (currentUserId && cId === currentUserId) || (currentEmail && cEmail === currentEmail);
+      });
+
       const combinedReqs = [...serverReqs];
-      localReqs.forEach(r => {
+      myLocalReqs.forEach(r => {
         if (!combinedReqs.some(cr => cr._id === r._id)) {
           combinedReqs.unshift(r);
         }
@@ -364,11 +374,19 @@ const BiomassDashboard = ({ user, token, apiBaseUrl, activeNavTab = 'map_post', 
         createdOrder = await response.json();
         setMyRequests(prev => [createdOrder, ...prev]);
       } else {
-        // Fallback local request
+        // Fallback local request tagged with producer identity
+        const targetProducerId = (selectedListing.producer?._id || selectedListing.producerId || selectedListing.producer || '').toString();
+        const targetProducerEmail = (selectedListing.producer?.email || selectedListing.producerEmail || '').toLowerCase().trim();
+
         createdOrder = {
           _id: 'req_' + Math.random().toString(36).substring(2, 9),
           listing: selectedListing,
-          consumer: user || { name: 'Bio-Energy Recycler' },
+          consumer: user || { _id: currentUserId, name: 'Bio-Energy Recycler', email: currentEmail },
+          consumerId: currentUserId || 'local_recycler',
+          consumerEmail: currentEmail,
+          producer: selectedListing.producer || targetProducerId || 'local_user',
+          producerId: targetProducerId,
+          producerEmail: targetProducerEmail,
           scheduledTime: payload.scheduledTime,
           status: 'pending',
           notes: requestNotes,

@@ -120,7 +120,8 @@ const AuthPortal = ({ onAuthSuccess, apiBaseUrl, language = 'English', t: propT,
       if (!isLogin) {
         const localUsers = JSON.parse(localStorage.getItem('ecolink_local_users') || '[]');
         if (!localUsers.some(u => u.email.toLowerCase() === cleanEmail.toLowerCase())) {
-          localUsers.push({ ...data.user, password });
+          const { password: _, ...safeUser } = data.user;
+          localUsers.push(safeUser);
           localStorage.setItem('ecolink_local_users', JSON.stringify(localUsers));
         }
       }
@@ -158,24 +159,45 @@ const AuthPortal = ({ onAuthSuccess, apiBaseUrl, language = 'English', t: propT,
           onAuthSuccess('local_token_' + newUser._id, newUser);
           return;
         } else {
-          // Offline login check against locally registered users or create demo user on the fly
+          // Offline login check against registered users & seed demo users only
+          const seedUsers = [
+            {
+              _id: 'user_seller_01',
+              name: 'Green Earth Organics',
+              email: 'seller@ecolink.com',
+              password: 'password123',
+              role: 'food_business',
+              contact: { phone: '9876543210', address: 'Bandra West, Mumbai' },
+              location: { type: 'Point', coordinates: [72.8360, 19.0596] }
+            },
+            {
+              _id: 'user_recycler_01',
+              name: 'BioPower Energy Solutions',
+              email: 'recycler@ecolink.com',
+              password: 'password123',
+              role: 'biomass_company',
+              contact: { phone: '9876543211', address: 'Andheri East, Mumbai' },
+              location: { type: 'Point', coordinates: [72.8697, 19.1136] }
+            }
+          ];
+
           const localUsers = JSON.parse(localStorage.getItem('ecolink_local_users') || '[]');
-          let foundUser = localUsers.find(
+          const allKnownUsers = [...seedUsers, ...localUsers];
+
+          const foundUser = allKnownUsers.find(
             u => u.email.toLowerCase() === cleanEmail.toLowerCase()
           );
 
           if (!foundUser) {
-            foundUser = {
-              _id: 'user_' + Math.random().toString(36).substring(2, 9),
-              name: cleanEmail.toLowerCase().includes('recycler') ? 'Bio-Energy Recycler' : 'priya',
-              email: cleanEmail,
-              password: password,
-              role: cleanEmail.toLowerCase().includes('recycler') ? 'biomass_company' : 'food_business',
-              contact: { phone: '9876543210', address: 'Mumbai Commercial Hub' },
-              location: { type: 'Point', coordinates: [72.8777, 19.0760] }
-            };
-            localUsers.push(foundUser);
-            localStorage.setItem('ecolink_local_users', JSON.stringify(localUsers));
+            setErrorMsg('No registered account found with this email address. Please register first.');
+            setIsLoading(false);
+            return;
+          }
+
+          if (foundUser.password && foundUser.password !== password) {
+            setErrorMsg('Invalid email or password.');
+            setIsLoading(false);
+            return;
           }
 
           onAuthSuccess('local_token_' + foundUser._id, foundUser);

@@ -2,13 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { Plus, BarChart2, Calendar, Clipboard, Truck, Check, X, AlertCircle, Award, Image as ImageIcon, Camera, Trash2, Clock, MapPin, Tag, RefreshCw, Inbox, CheckCircle2, Printer, Download } from 'lucide-react';
 import { getTranslation } from '../translations';
 
-const FoodBusinessDashboard = ({ token, apiBaseUrl, activeNavTab = 'map_post', language = 'English', t: propT }) => {
+const FoodBusinessDashboard = ({ user, token, apiBaseUrl, activeNavTab = 'map_post', language = 'English', t: propT }) => {
   const t = propT || getTranslation(language);
+  const currentUserId = (user?._id || user?.id || '').toString();
+  const currentEmail = (user?.email || '').toLowerCase().trim();
+
   // Logging state
   const [category, setCategory] = useState('raw_organic');
+  const [customCategory, setCustomCategory] = useState('');
+  const [isCustomCategory, setIsCustomCategory] = useState(false);
+
   const [weight, setWeight] = useState('');
   const [description, setDescription] = useState('');
   const [expiryHours, setExpiryHours] = useState('24');
+  const [customExpiryHours, setCustomExpiryHours] = useState('');
+  const [isCustomExpiry, setIsCustomExpiry] = useState(false);
+
   const [pricingModel, setPricingModel] = useState('free'); // 'free' or 'priced'
   const [pricePerKg, setPricePerKg] = useState('12');
   const [imageFileName, setImageFileName] = useState('');
@@ -48,20 +57,32 @@ const FoodBusinessDashboard = ({ token, apiBaseUrl, activeNavTab = 'map_post', l
         }
       }
 
-      // Merge local listings from localStorage
+      // Merge local listings created by THIS seller only
       const localListings = JSON.parse(localStorage.getItem('ecolink_local_listings') || '[]');
+      const myLocalListings = localListings.filter(item => {
+        const pId = (item.producerId || item.producer?._id || item.producer || '').toString();
+        const pEmail = (item.producerEmail || item.producer?.email || '').toLowerCase().trim();
+        return (currentUserId && pId === currentUserId) || (currentEmail && pEmail === currentEmail);
+      });
+
       const combinedListings = [...serverLists];
-      localListings.forEach(item => {
+      myLocalListings.forEach(item => {
         if (!combinedListings.some(l => l._id === item._id)) {
           combinedListings.unshift(item);
         }
       });
       setMyListings(combinedListings);
 
-      // Merge local requests from localStorage
+      // Merge local requests meant for THIS seller only
       const localReqs = JSON.parse(localStorage.getItem('ecolink_local_requests') || '[]');
+      const myLocalReqs = localReqs.filter(r => {
+        const pId = (r.producerId || r.producer?._id || r.producer || r.listing?.producer?._id || r.listing?.producerId || r.listing?.producer || '').toString();
+        const pEmail = (r.producerEmail || r.producer?.email || r.listing?.producer?.email || r.listing?.producerEmail || '').toLowerCase().trim();
+        return (currentUserId && pId === currentUserId) || (currentEmail && pEmail === currentEmail);
+      });
+
       const combinedReqs = [...serverReqs];
-      localReqs.forEach(r => {
+      myLocalReqs.forEach(r => {
         if (!combinedReqs.some(cr => cr._id === r._id)) {
           combinedReqs.unshift(r);
         }
@@ -83,7 +104,7 @@ const FoodBusinessDashboard = ({ token, apiBaseUrl, activeNavTab = 'map_post', l
 
   useEffect(() => {
     fetchDashboardData();
-  }, [token]);
+  }, [token, user]);
 
   // Log new waste listing
   const handleLogWaste = async (e) => {
@@ -91,6 +112,26 @@ const FoodBusinessDashboard = ({ token, apiBaseUrl, activeNavTab = 'map_post', l
     setErrorMsg('');
     setSuccessMsg('');
     setIsLoading(true);
+
+    const finalCategory = (isCustomCategory || category === 'custom')
+      ? customCategory.trim()
+      : category;
+
+    const finalExpiryHours = (isCustomExpiry || expiryHours === 'custom')
+      ? parseFloat(customExpiryHours || '24')
+      : parseFloat(expiryHours || '24');
+
+    if ((isCustomCategory || category === 'custom') && !customCategory.trim()) {
+      setErrorMsg('Please specify a custom resource category name.');
+      setIsLoading(false);
+      return;
+    }
+
+    if ((isCustomExpiry || expiryHours === 'custom') && (!customExpiryHours || isNaN(parseFloat(customExpiryHours)) || parseFloat(customExpiryHours) <= 0)) {
+      setErrorMsg('Please specify a valid custom expiry time in hours.');
+      setIsLoading(false);
+      return;
+    }
 
     const parsedWeight = parseFloat(weight);
     if (!weight || isNaN(parsedWeight) || parsedWeight <= 0) {
@@ -103,13 +144,25 @@ const FoodBusinessDashboard = ({ token, apiBaseUrl, activeNavTab = 'map_post', l
     const computedTotalPrice = pricingModel === 'priced' ? Math.round(parsedWeight * numPricePerKg) : 0;
 
     const payload = {
-      category,
+      category: finalCategory,
       weight: parsedWeight,
       description: description || 'Standard organic waste batch',
-      expiryHours: parseFloat(expiryHours || '24'),
+      expiryHours: finalExpiryHours,
       pricingModel,
       pricePerKg: numPricePerKg,
       totalPrice: computedTotalPrice
+    };
+
+    const resetForm = () => {
+      setWeight('');
+      setDescription('');
+      setExpiryHours('24');
+      setCustomExpiryHours('');
+      setIsCustomExpiry(false);
+      setCategory('raw_organic');
+      setCustomCategory('');
+      setIsCustomCategory(false);
+      setImageFileName('');
     };
 
     try {
@@ -125,10 +178,7 @@ const FoodBusinessDashboard = ({ token, apiBaseUrl, activeNavTab = 'map_post', l
       if (response && response.ok) {
         const newListing = await response.json();
         setSuccessMsg('🌱 Waste resource posted successfully!');
-        setWeight('');
-        setDescription('');
-        setExpiryHours('24');
-        setImageFileName('');
+        resetForm();
         
         if (newListing && newListing._id) {
           setMyListings(prev => [newListing, ...prev.filter(item => item._id !== newListing._id)]);
@@ -136,10 +186,10 @@ const FoodBusinessDashboard = ({ token, apiBaseUrl, activeNavTab = 'map_post', l
         fetchDashboardData();
         setTimeout(() => setSuccessMsg(''), 4000);
       } else {
-        // Fallback local listing creation so application never fails!
+        // Fallback local listing creation tagged with current producer's identity
         const localItem = {
           _id: 'batch_' + Math.random().toString(36).substring(2, 9),
-          category,
+          category: payload.category,
           weight: parsedWeight,
           description: payload.description,
           expiryHours: payload.expiryHours,
@@ -148,7 +198,15 @@ const FoodBusinessDashboard = ({ token, apiBaseUrl, activeNavTab = 'map_post', l
           totalPrice: computedTotalPrice,
           status: 'available',
           createdAt: new Date().toISOString(),
-          location: { type: 'Point', coordinates: [72.8777, 19.0760] }
+          location: user?.location || { type: 'Point', coordinates: [72.8777, 19.0760] },
+          producer: {
+            _id: currentUserId || 'local_user',
+            name: user?.name || 'Waste Seller',
+            email: currentEmail || '',
+            contact: user?.contact || {}
+          },
+          producerId: currentUserId || 'local_user',
+          producerEmail: currentEmail || ''
         };
         const localListings = JSON.parse(localStorage.getItem('ecolink_local_listings') || '[]');
         localListings.unshift(localItem);
@@ -156,23 +214,28 @@ const FoodBusinessDashboard = ({ token, apiBaseUrl, activeNavTab = 'map_post', l
 
         setMyListings(prev => [localItem, ...prev]);
         setSuccessMsg('🌱 Waste resource posted successfully!');
-        setWeight('');
-        setDescription('');
-        setExpiryHours('24');
-        setImageFileName('');
+        resetForm();
         setTimeout(() => setSuccessMsg(''), 4000);
       }
     } catch (err) {
       console.error('Log waste error:', err);
       const localItem = {
         _id: 'batch_' + Math.random().toString(36).substring(2, 9),
-        category,
+        category: payload.category,
         weight: parsedWeight,
         description: payload.description,
         expiryHours: payload.expiryHours,
         status: 'available',
         createdAt: new Date().toISOString(),
-        location: { type: 'Point', coordinates: [72.8777, 19.0760] }
+        location: user?.location || { type: 'Point', coordinates: [72.8777, 19.0760] },
+        producer: {
+          _id: currentUserId || 'local_user',
+          name: user?.name || 'Waste Seller',
+          email: currentEmail || '',
+          contact: user?.contact || {}
+        },
+        producerId: currentUserId || 'local_user',
+        producerEmail: currentEmail || ''
       };
       const localListings = JSON.parse(localStorage.getItem('ecolink_local_listings') || '[]');
       localListings.unshift(localItem);
@@ -180,10 +243,7 @@ const FoodBusinessDashboard = ({ token, apiBaseUrl, activeNavTab = 'map_post', l
 
       setMyListings(prev => [localItem, ...prev]);
       setSuccessMsg('🌱 Waste resource posted successfully!');
-      setWeight('');
-      setDescription('');
-      setExpiryHours('24');
-      setImageFileName('');
+      resetForm();
       setTimeout(() => setSuccessMsg(''), 4000);
     } finally {
       setIsLoading(false);
@@ -600,37 +660,125 @@ const FoodBusinessDashboard = ({ token, apiBaseUrl, activeNavTab = 'map_post', l
 
           <form onSubmit={handleLogWaste} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             
-            {/* Row 1: Category & Expiry */}
+            {/* Row 1: Category & Expiry with Manual Options */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              
+              {/* Category Dropdown & Manual Input Toggle */}
               <div>
-                <label style={{ fontSize: '12px', color: '#475569', fontWeight: '600', display: 'block', marginBottom: '6px' }}>Resource Category</label>
-                <select 
-                  className="auth-light-input" 
-                  value={category} 
-                  onChange={(e) => setCategory(e.target.value)}
-                  style={{ padding: '10px 12px' }}
-                >
-                  <option value="raw_organic">Raw Organic Waste</option>
-                  <option value="cooked_food">Cooked Excess Food</option>
-                  <option value="bakery">Bakery / Spent Grains</option>
-                  <option value="oil_grease">Used Cooking Oil (UCO)</option>
-                </select>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label style={{ fontSize: '12px', color: '#475569', fontWeight: '600' }}>Resource Category</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextState = !isCustomCategory;
+                      setIsCustomCategory(nextState);
+                      if (nextState) {
+                        setCategory('custom');
+                      } else {
+                        setCategory('raw_organic');
+                      }
+                    }}
+                    style={{ background: 'none', border: 'none', color: '#059669', fontSize: '11px', fontWeight: '700', cursor: 'pointer', padding: 0 }}
+                  >
+                    {isCustomCategory || category === 'custom' ? '📋 Select Preset' : '✍️ Type Manually'}
+                  </button>
+                </div>
+
+                {isCustomCategory || category === 'custom' ? (
+                  <input 
+                    type="text" 
+                    className="auth-light-input" 
+                    placeholder="e.g. Sugarcane Bagasse, Dairy Whey"
+                    value={customCategory}
+                    onChange={(e) => setCustomCategory(e.target.value)}
+                    style={{ padding: '10px 12px' }}
+                    required
+                  />
+                ) : (
+                  <select 
+                    className="auth-light-input" 
+                    value={category} 
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCategory(val);
+                      if (val === 'custom') {
+                        setIsCustomCategory(true);
+                      }
+                    }}
+                    style={{ padding: '10px 12px' }}
+                  >
+                    <option value="raw_organic">Raw Organic Waste</option>
+                    <option value="cooked_food">Cooked Excess Food</option>
+                    <option value="bakery">Bakery / Spent Grains</option>
+                    <option value="oil_grease">Used Cooking Oil (UCO)</option>
+                    <option value="agri_stubble">Crop Stubble / Agricultural Husk</option>
+                    <option value="fruit_sludge">Fruit & Vegetable Pulp/Sludge</option>
+                    <option value="custom">✍️ Custom / Type Manually...</option>
+                  </select>
+                )}
               </div>
 
+              {/* Expiry Dropdown & Manual Time Entry Toggle */}
               <div>
-                <label style={{ fontSize: '12px', color: '#475569', fontWeight: '600', display: 'block', marginBottom: '6px' }}>Expires In</label>
-                <select 
-                  className="auth-light-input" 
-                  value={expiryHours} 
-                  onChange={(e) => setExpiryHours(e.target.value)}
-                  style={{ padding: '10px 12px' }}
-                >
-                  <option value="6">6 Hours (Urgent)</option>
-                  <option value="12">12 Hours</option>
-                  <option value="24">24 Hours (Standard)</option>
-                  <option value="48">48 Hours</option>
-                </select>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label style={{ fontSize: '12px', color: '#475569', fontWeight: '600' }}>Expires In</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextState = !isCustomExpiry;
+                      setIsCustomExpiry(nextState);
+                      if (nextState) {
+                        setExpiryHours('custom');
+                      } else {
+                        setExpiryHours('24');
+                      }
+                    }}
+                    style={{ background: 'none', border: 'none', color: '#059669', fontSize: '11px', fontWeight: '700', cursor: 'pointer', padding: 0 }}
+                  >
+                    {isCustomExpiry || expiryHours === 'custom' ? '📋 Preset Duration' : '⏱️ Custom Entry'}
+                  </button>
+                </div>
+
+                {isCustomExpiry || expiryHours === 'custom' ? (
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <input 
+                      type="number" 
+                      className="auth-light-input" 
+                      placeholder="e.g. 18"
+                      value={customExpiryHours}
+                      onChange={(e) => setCustomExpiryHours(e.target.value)}
+                      style={{ padding: '10px 12px', flex: 1 }}
+                      min="1"
+                      max="720"
+                      required
+                    />
+                    <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '10px 10px', borderRadius: '10px', whiteSpace: 'nowrap' }}>
+                      Hours
+                    </span>
+                  </div>
+                ) : (
+                  <select 
+                    className="auth-light-input" 
+                    value={expiryHours} 
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setExpiryHours(val);
+                      if (val === 'custom') {
+                        setIsCustomExpiry(true);
+                      }
+                    }}
+                    style={{ padding: '10px 12px' }}
+                  >
+                    <option value="6">6 Hours (Urgent)</option>
+                    <option value="12">12 Hours</option>
+                    <option value="24">24 Hours (Standard)</option>
+                    <option value="48">48 Hours (2 Days)</option>
+                    <option value="72">72 Hours (3 Days)</option>
+                    <option value="custom">⚙️ Custom Time Entry...</option>
+                  </select>
+                )}
               </div>
+
             </div>
 
             {/* Row 2: Weight & Pricing */}
